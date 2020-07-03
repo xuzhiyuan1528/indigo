@@ -85,6 +85,11 @@ class Sender(object):
         self.step_start_ms = None
         self.running = True
 
+        self.new_rec_count = 0
+        self.new_send_count = 0
+        self.new_pre_state = ''
+        self.new_rtt_buf = []
+
         if self.train:
             self.step_cnt = 0
 
@@ -118,6 +123,8 @@ class Sender(object):
 
     def update_state(self, ack):
         """ Update the state variables listed in __init__() """
+        self.new_rec_count += 1
+
         self.next_ack = max(self.next_ack, ack.seq_num + 1)
         curr_time_ms = curr_ts_ms()
 
@@ -129,6 +136,8 @@ class Sender(object):
             if self.ts_first is None:
                 self.ts_first = curr_time_ms
             self.rtt_buf.append(rtt)
+        else:
+            self.new_rtt_buf.append(rtt)
 
         delay = rtt - self.min_rtt
         if self.delay_ewma is None:
@@ -198,6 +207,16 @@ class Sender(object):
 
         # At each step end, feed the state:
         if curr_ts_ms() - self.step_start_ms > self.step_len_ms:  # step's end
+            self.new_send_count = self.seq_num
+            new_not_ack_count = self.new_send_count - self.new_rec_count
+            new_loss = float(new_not_ack_count) / self.new_send_count
+
+            new_latency = self.new_compute_latency()
+
+            new_throughput = float(self.new_rec_count) / self.step_len_ms
+
+            new_ele_list = [new_throughput, new_latency, new_loss]
+            new_reward = 10 * new_throughput - 1000 * new_latency - 2000 * new_loss
             state = [self.delay_ewma,
                      self.delivery_rate_ewma,
                      self.send_rate_ewma,
@@ -207,7 +226,19 @@ class Sender(object):
             if self.debug:
                 start_sample = time.time()
 
-            action = self.sample_action(state)
+            action, new_aug_state = self.sample_action(state)
+
+            new_is_done = 0
+
+            file = '/home/cst/wk/pantheon/indigo_state.log'
+            with open(file, 'a+') as f:
+                f.write('|'.join([str(self.new_pre_state), str(action), str(new_aug_state),
+                                  str(new_reward), str(new_is_done), str(new_ele_list)]))
+                f.write('\n')
+            f.close()
+
+            self.new_pre_state = new_aug_state
+            self.new_rec_count = 0
 
             if self.debug:
                 self.sampling_file.write('%.2f ms\n' % ((time.time() - start_sample) * 1000))
@@ -265,7 +296,12 @@ class Sender(object):
     def compute_performance(self):
         duration = curr_ts_ms() - self.ts_first
         tput = 0.008 * self.delivered / duration
-        perc_delay = np.percentile(self.rtt_buf, 95)
+        perc_delay = np.percentile(self.rtt_buf, 95) #latency
 
         with open(path.join(project_root.DIR, 'env', 'perf'), 'a', 0) as perf:
             perf.write('%.2f %d\n' % (tput, perc_delay))
+
+    def new_compute_latency(self):
+        latency = np.percentile(self.new_rtt_buf, 95) #latency
+
+        return latency

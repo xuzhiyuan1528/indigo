@@ -71,7 +71,7 @@ class Learner(object):
         # temperature = 1.0
         # temp_probs = softmax(action_probs[0] / temperature)
         # action = np.argmax(np.random.multinomial(1, temp_probs - 1e-5))
-        return action
+        return action, aug_state
 
 
 def main():

@@ -18,7 +18,7 @@ from os import path
 import sys
 import signal
 from subprocess import Popen
-from sender import Sender
+from env.sender import Sender
 import project_root
 from helpers.helpers import get_open_udp_port
 
