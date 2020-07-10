@@ -22,6 +22,7 @@ from os import path
 import numpy as np
 import datagram_pb2
 import project_root
+import datetime
 from helpers.helpers import (
     curr_ts_ms, apply_op,
     READ_FLAGS, ERR_FLAGS, READ_ERR_FLAGS, WRITE_FLAGS, ALL_FLAGS)
@@ -87,6 +88,8 @@ class Sender(object):
 
         self.new_rec_count = 0
         self.new_send_count = 0
+        self.last_seq_num = 0
+        self.last_delivered = 0
         self.new_pre_state = ''
         self.new_rtt_buf = []
 
@@ -95,6 +98,11 @@ class Sender(object):
 
             self.ts_first = None
             self.rtt_buf = []
+        
+        self.fout = '/home/eric/Dev/DRL-IL/pantheon/third_party/indigo/data'
+        fname = datetime.datetime.now().strftime('%d%H%M%S')
+        self.fout = '{}/{}.log'.format(self.fout, fname)
+        self.fout = open(self.fout, 'w')
 
     def cleanup(self):
         if self.debug and self.sampling_file:
@@ -207,16 +215,23 @@ class Sender(object):
 
         # At each step end, feed the state:
         if curr_ts_ms() - self.step_start_ms > self.step_len_ms:  # step's end
-            self.new_send_count = self.seq_num
+            self.new_send_count = self.seq_num - self.last_seq_num
+            self.last_seq_num = self.seq_num
             new_not_ack_count = self.new_send_count - self.new_rec_count
-            new_loss = float(new_not_ack_count) / self.new_send_count
+            new_loss = float(new_not_ack_count) / self.new_send_count if self.new_send_count else 0
 
-            new_latency = self.new_compute_latency()
+            new_latency = self.new_compute_latency() / 1000 # s
 
-            new_throughput = float(self.new_rec_count) / self.step_len_ms
+            # new_throughput = float(self.new_rec_count) / self.step_len_ms
+            delivered = self.delivered - self.last_delivered
+            new_throughput = 0.008 * delivered / self.step_len_ms # Mbit/s
+            self.last_delivered = self.delivered
 
             new_ele_list = [new_throughput, new_latency, new_loss]
-            new_reward = 10 * new_throughput - 1000 * new_latency - 2000 * new_loss
+
+            # sys.stderr.write(str(new_ele_list)+'\n')
+            
+            new_reward = new_throughput - 10 * new_latency
             state = [self.delay_ewma,
                      self.delivery_rate_ewma,
                      self.send_rate_ewma,
@@ -230,12 +245,9 @@ class Sender(object):
 
             new_is_done = 0
 
-            file = '/home/cst/wk/pantheon/indigo_state.log'
-            with open(file, 'a+') as f:
-                f.write('|'.join([str(self.new_pre_state), str(action), str(new_aug_state),
-                                  str(new_reward), str(new_is_done), str(new_ele_list)]))
-                f.write('\n')
-            f.close()
+            self.fout.write('|'.join([str(self.new_pre_state), str(action), str(new_aug_state), 
+                                str(new_reward), str(new_is_done), str(new_ele_list)]))
+            self.fout.write('\n')
 
             self.new_pre_state = new_aug_state
             self.new_rec_count = 0
@@ -303,5 +315,5 @@ class Sender(object):
 
     def new_compute_latency(self):
         latency = np.percentile(self.new_rtt_buf, 95) #latency
-
+        self.new_rtt_buf = []
         return latency

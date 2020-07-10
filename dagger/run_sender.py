@@ -18,6 +18,7 @@
 import argparse
 import project_root
 import numpy as np
+import time
 import tensorflow as tf
 from os import path
 from env.sender import Sender
@@ -48,12 +49,15 @@ class Learner(object):
         uninit_vars -= set(self.model.trainable_vars)
         self.sess.run(tf.variables_initializer(uninit_vars))
 
+        self.log = open('/home/eric/Dev/DRL-IL/pantheon/third_party/indigo/logs.txt', 'w')
+
     def sample_action(self, state):
         norm_state = normalize(state)
 
         one_hot_action = one_hot(self.prev_action, self.action_cnt)
         aug_state = norm_state + one_hot_action
 
+        btime = time.time()
         # Get probability of each action from the local network.
         pi = self.model
         feed_dict = {
@@ -66,6 +70,9 @@ class Learner(object):
         # Choose an action to take
         action = np.argmax(action_probs[0][0])
         self.prev_action = action
+
+        info = 'make decision {} to {} with {}s \n'.format(action, state[3], time.time()-btime)
+        self.log.write(info)
 
         # action = np.argmax(np.random.multinomial(1, action_probs[0] - 1e-5))
         # temperature = 1.0
